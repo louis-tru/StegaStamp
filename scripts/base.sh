@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 EXP_NAME=$1
-python train.py $EXP_NAME \
+python3.7 train.py $EXP_NAME \
 --secret_size 100 \
 --num_steps 140000 \
 --no_im_loss_steps 1500 \
