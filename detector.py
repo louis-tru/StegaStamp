@@ -171,6 +171,7 @@ def main():
                 if bitflips != -1:
                     print('Num bits corrected: ', bitflips)
                     try:
+                        print('----', data.decode("utf-8"))
                         code = data.decode("utf-8")
                     except:
                         continue

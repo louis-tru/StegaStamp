@@ -6,3 +6,4 @@ detector_models*
 saved_models*
 out/
 **.pyc
+**.DS_Store

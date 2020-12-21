@@ -48,11 +48,17 @@ def main():
 
     bch = bchlib.BCH(BCH_POLYNOMIAL, BCH_BITS)
 
-    if len(args.secret) > 7:
+    print('--------', args.secret, len(args.secret))
+
+    data = bytearray(args.secret, 'utf-8')
+
+    if len(data) > 7:
         print('Error: Can only encode 56bits (7 characters) with ECC')
         return
 
-    data = bytearray(args.secret + ' '*(7-len(args.secret)), 'utf-8')
+    # bytearray
+    data = data + bytes(' '*(7-len(data)),'utf-8')
+    print('--------', data)
     ecc = bch.encode(data)
     packet = data + ecc
 
@@ -72,19 +78,19 @@ def main():
             feed_dict = {input_secret:[secret],
                          input_image:[image]}
 
+            save_name = filename.split('/')[-1].split('.')[0]
+            # raw_img = (image * 255).astype(np.uint8)
+
             hidden_img, residual = sess.run([output_stegastamp, output_residual],feed_dict=feed_dict)
 
-            rescaled = (hidden_img[0] * 255).astype(np.uint8)
-            raw_img = (image * 255).astype(np.uint8)
-            residual = residual[0]+.5
-
-            residual = (residual * 255).astype(np.uint8)
-
-            save_name = filename.split('/')[-1].split('.')[0]
-
+            rescaled = hidden_img[0]
+            rescaled = (rescaled * 255).astype(np.uint8)
             im = Image.fromarray(np.array(rescaled))
             im.save(args.save_dir + '/'+save_name+'_hidden.png')
 
+            residual = residual[0]+.5
+            residual = (residual * 255).astype(np.uint8)
+            print('----', len(residual), len(residual[0]), len(residual[0][0]), residual)
             im = Image.fromarray(np.squeeze(np.array(residual)))
             im.save(args.save_dir + '/'+save_name+'_residual.png')
 
