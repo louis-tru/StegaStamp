@@ -107,7 +107,7 @@ def main():
 
 			### 保存最终 image
 			im = im.convert("RGBA")
-			im.putalpha(int(255 * 0.2)) # 设置每个像素点颜色的透明度 = 30%, 这个值越大识别率越高
+			im.putalpha(int(255 * 0.3)) # 设置每个像素点颜色的透明度 = 30%, 这个值越大识别率越高
 			im = im.resize(rawImage.size)
 			im = ImageChops.hard_light(rawImage, im) # 使用强光模式叠加
 			im = Image.alpha_composite(rawImage, im)

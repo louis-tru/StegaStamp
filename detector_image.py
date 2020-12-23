@@ -1,21 +1,10 @@
-import os,time,cv2, sys, math
-import bchlib
-import tensorflow as tf
-import argparse
+import bchlib, cv2, glob
+from PIL import Image, ImageOps
 import numpy as np
+import tensorflow as tf
 import tensorflow.contrib.image
 from tensorflow.python.saved_model import tag_constants
 from tensorflow.python.saved_model import signature_constants
-from PIL import Image,ImageOps,ImageChops
-
-parser = argparse.ArgumentParser()
-parser.add_argument('--detector_model', type=str, required=True)
-parser.add_argument('--decoder_model', type=str, required=True)
-parser.add_argument('--video', type=str, required=True)
-parser.add_argument('--secret_size', type=int, default=100)
-parser.add_argument('--save_video', type=str, default=None)
-parser.add_argument('--visualize_detector', action='store_true', help='Visualize detector mask output')
-args = parser.parse_args()
 
 BCH_POLYNOMIAL = 137
 BCH_BITS = 5
@@ -54,6 +43,24 @@ def writeImage(buf, name, i = -1, j = -1):
 	im.save('out/' + name + '.png')
 
 def main():
+	import argparse
+	parser = argparse.ArgumentParser()
+	# parser.add_argument('model', type=str)
+	parser.add_argument('--detector_model', type=str, required=True)
+	parser.add_argument('--decoder_model', type=str, required=True)
+	parser.add_argument('--image', type=str, default=None)
+	parser.add_argument('--images_dir', type=str, default=None)
+	# parser.add_argument('--secret_size', type=int, default=100)
+	args = parser.parse_args()
+
+	if args.image is not None:
+		files_list = [args.image]
+	elif args.images_dir is not None:
+		files_list = glob.glob(args.images_dir + '/*')
+	else:
+		print('Missing input image')
+		return
+
 	# Initializing network
 	config = tf.ConfigProto()
 	config.gpu_options.allow_growth = True
@@ -80,28 +87,22 @@ def main():
 		decoder_output_name = decoder_model.signature_def[signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY].outputs['decoded'].name
 		decoder_output = decoder_graph.get_tensor_by_name(decoder_output_name)
 
-	cap = cv2.VideoCapture(args.video)
 	bch = bchlib.BCH(BCH_POLYNOMIAL, BCH_BITS)
-
-	ret, frame = cap.read()
-	f_height, f_width = frame.shape[0:2]
-
-	if args.save_video is not None:
-		fourcc1 = cv2.VideoWriter_fourcc(*'XVID')
-		out = cv2.VideoWriter(args.save_video, fourcc1, 30.0, (f_width, f_height))
 
 	ii = 0
 
-	while(True):
-		ret, frame = cap.read()
-		if frame is None:
-			break
-		frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-		detector_image_input_0 = cv2.resize(frame_rgb, (1024,1024))
-		detector_image_input = np.expand_dims(np.float32(detector_image_input_0),axis=0)/255.0
+	for filename in files_list:
+		image = Image.open(filename).convert("RGB")
+		# np.array(image.resize((1024, 1024),Image.BICUBIC))
+		# image_rgb =  cv2.cvtColor(np.array(image), cv2.COLOR_BGR2RGB)
+		image_rgb = np.array(image.resize((1024, 1024), Image.BICUBIC))
+		# image_rgb =  cv2.cvtColor(image_rgb, cv2.COLOR_BGR2RGB)
+		# image_rgb = cv2.resize(image_rgb, (1024,1024))
+		detector_image_input = np.expand_dims(image_rgb,axis=0) / 255.
 
 		# print('detector_image_input', detector_image_input)
+
+		writeImage(image_rgb, 'aa_image_rgb')
 
 		output_image = detector_sess.run(detector_output,feed_dict={detector_input:detector_image_input})
 
@@ -111,16 +112,11 @@ def main():
 		color_codes = np.array([[255,255,255],[0,0,0]])
 		out_vis_image = color_codes[output_image.astype(int)]
 
-		# writeImage(out_vis_image.astype(np.uint8), 'test_contour')
+		writeImage(out_vis_image.astype(np.uint8), 'aa')
 
-		mask_im = cv2.resize(np.float32(out_vis_image), (f_width,f_height))
+		mask_im = cv2.resize(np.float32(out_vis_image), image.size)
 
-		if args.visualize_detector:
-			mask_vis = mask_im.astype(np.uint8)
-
-		# print('args.visualize_detector', args.visualize_detector)
-
-		# print('frame.size', (f_width,f_height))
+		print('image.size', image.size)
 
 		ii += 1
 		jj = 0
@@ -128,17 +124,21 @@ def main():
 		contours, _ = cv2.findContours(cv2.cvtColor(mask_im, cv2.COLOR_BGR2GRAY).astype(np.uint8),1,2)
 		extrema = np.zeros((8,2))
 		corners = np.zeros((4,2))
+
+		print('contours.len', len(contours))
+
 		for cnt in contours:
 			area = cv2.contourArea(cnt)
 			if area < 1000:
+				# print('area < 1000', area)
 				continue
+
+			# print('area >= 1000', area)
 
 			hull = cv2.convexHull(cnt)
 			if len(hull) < 4:
+				# print('len(hull) < 4', len(hull))
 				continue
-
-			if args.visualize_detector:
-				cv2.polylines(mask_vis, np.int32([corners]), thickness=6, color=(100,100,250), isClosed=True)
 
 			extrema[0,:] = hull[np.argmax(hull[:,0,0]),0,:]
 			extrema[1,:] = hull[np.argmax(hull[:,0,0]+hull[:,0,1]),0,:]
@@ -169,22 +169,28 @@ def main():
 			pts_dst = np.array([[0,0],[399,0],[399,399],[0,399]])
 			h, status = cv2.findHomography(corners_full_res, pts_dst)
 			try:
-				warped_im = cv2.warpPerspective(frame_rgb, h, (400,400))
+				warped_im = cv2.warpPerspective(image_rgb, h, (400,400))
 				# print('warped_im', warped_im)
 				w_im = warped_im.astype(np.float32)
+				# w_im = np.array(warped_im, dtype=np.float32)
 				w_im /= 255.
 			except:
 				continue
 
-			print('----,', 'frame:', ii, 'index:', jj)
+			print('decode index', ii, jj)
+			# print('decode w_im', ii, jj, w_im)
 
 			jj += 1
 
-			for im_rotation in range(4):
+			writeImage(warped_im, 'aa', ii, jj)
+
+			for im_rotation in range(1):
 				w_rotated = np.rot90(w_im, im_rotation)
 				recovered_secret = decoder_sess.run([decoder_output],feed_dict={decoder_input:[w_rotated]})[0][0]
 				recovered_secret = list(recovered_secret)
 				recovered_secret = [int(i) for i in recovered_secret]
+
+				# print('im_rotation', im_rotation, ii, jj)
 
 				packet_binary = "".join([str(bit) for bit in recovered_secret[:96]])
 				footer = recovered_secret[96:]
@@ -200,30 +206,10 @@ def main():
 				if bitflips != -1:
 					print('Num bits corrected: ', bitflips)
 					try:
+						print('----', data.decode("utf-8"))
 						code = data.decode("utf-8")
-						print('----', code)
-						writeImage(warped_im, 'test', ii, jj)
-						writeImage(frame_rgb, 'test_raw', ii, jj)
-						writeImage(out_vis_image.astype(np.uint8), 'test_contour', ii, jj)
-						writeImage(detector_image_input_0, 'test_raw_1024', ii, jj)
 					except:
 						continue
-					color = (100,250,100)
-					cv2.polylines(frame, np.int32([corners]), thickness=6, color=color, isClosed=True)
-					font = cv2.FONT_HERSHEY_SIMPLEX
-					im = cv2.putText(frame, code, tuple((corners[0,:]+np.array([0,-15])).astype(np.int)), font, 1,(0,0,0), 2, cv2.LINE_AA)
-
-		if args.save_video is not None:
-			out.write(frame)
-		else:
-			cv2.imshow('frame',frame)
-			if args.visualize_detector:
-				cv2.imshow('detector_mask', mask_vis)
-			cv2.waitKey(1)
-
-	cap.release()
-	if args.save_video:
-		out.release()
 
 if __name__ == "__main__":
 	main()
